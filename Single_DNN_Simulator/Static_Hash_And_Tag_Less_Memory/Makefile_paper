@@ -1,0 +1,82 @@
+# Makefile for Stamp-Based Memory Management Paper
+
+# LaTeX compiler
+LATEX = pdflatex
+BIBTEX = bibtex
+
+# Main document
+MAIN = stamp_paper
+BIB = references
+
+# Targets
+.PHONY: all clean view help
+
+all: $(MAIN).pdf
+
+help:
+	@echo "====================================================="
+	@echo "Stamp-Based Memory Management Paper Build System"
+	@echo "====================================================="
+	@echo ""
+	@echo "Targets:"
+	@echo "  all     - Build the PDF (default)"
+	@echo "  clean   - Remove generated files"
+	@echo "  view    - Open the PDF (requires PDF viewer)"
+	@echo "  help    - Show this help"
+	@echo ""
+	@echo "Usage:"
+	@echo "  make         # Build the paper"
+	@echo "  make clean   # Clean up"
+	@echo ""
+
+$(MAIN).pdf: $(MAIN).tex $(BIB).bib
+	@echo "Compiling LaTeX document..."
+	$(LATEX) $(MAIN).tex
+	@echo "Running BibTeX..."
+	$(BIBTEX) $(MAIN)
+	@echo "Recompiling for references..."
+	$(LATEX) $(MAIN).tex
+	$(LATEX) $(MAIN).tex
+	@echo ""
+	@echo "✓ PDF generated: $(MAIN).pdf"
+	@echo ""
+
+view: $(MAIN).pdf
+	@echo "Opening PDF..."
+	@if command -v xdg-open > /dev/null 2>&1; then \
+		xdg-open $(MAIN).pdf; \
+	elif command -v open > /dev/null 2>&1; then \
+		open $(MAIN).pdf; \
+	elif command -v evince > /dev/null 2>&1; then \
+		evince $(MAIN).pdf &; \
+	else \
+		echo "No PDF viewer found. Please open $(MAIN).pdf manually."; \
+	fi
+
+clean:
+	@echo "Cleaning generated files..."
+	rm -f $(MAIN).aux
+	rm -f $(MAIN).bbl
+	rm -f $(MAIN).blg
+	rm -f $(MAIN).log
+	rm -f $(MAIN).out
+	rm -f $(MAIN).pdf
+	rm -f $(MAIN).toc
+	rm -f $(MAIN).lof
+	rm -f $(MAIN).lot
+	@echo "✓ Clean complete"
+
+# Quick compile (no BibTeX)
+quick: $(MAIN).tex
+	$(LATEX) $(MAIN).tex
+
+# Count words (approximate)
+wordcount:
+	@echo "Approximate word count:"
+	@pdftotext $(MAIN).pdf - | wc -w
+
+# Check for common LaTeX errors
+check:
+	@echo "Checking for common issues..."
+	@grep -n "\\cite{}" $(MAIN).tex && echo "Found empty citations!" || echo "✓ No empty citations"
+	@grep -n "???" $(MAIN).pdf && echo "Found unresolved references!" || echo "✓ All references resolved"

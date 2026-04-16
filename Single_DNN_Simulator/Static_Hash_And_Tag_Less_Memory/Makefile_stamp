@@ -1,0 +1,100 @@
+# Makefile for Stamp-Based Memory Management System
+
+# Simulator
+SIM ?= iverilog
+SIMFLAGS = -g2012 -Wall
+
+# Source files
+PKG_FILES = systolic_array_pkg.sv \
+            stamp_memory_pkg.sv
+
+RTL_FILES = stamp_based_memory_controller.sv \
+            systolic_array_stamp_top.sv
+
+TB_FILES = stamp_based_memory_tb.sv
+
+ALL_SV = $(PKG_FILES) $(RTL_FILES) $(TB_FILES)
+
+# Output files
+SIM_OUT = stamp_sim
+VCD_FILE = stamp_memory.vcd
+
+# Python
+PYTHON = python3
+
+# Targets
+.PHONY: all compile simulate run_compiler clean help
+
+all: compile
+
+help:
+	@echo "====================================================="
+	@echo "Stamp-Based Memory Management Build System"
+	@echo "====================================================="
+	@echo ""
+	@echo "Targets:"
+	@echo "  compile       - Compile SystemVerilog sources"
+	@echo "  simulate      - Run simulation"
+	@echo "  run_compiler  - Run the stamp compiler"
+	@echo "  clean         - Remove generated files"
+	@echo "  help          - Show this help"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make compile"
+	@echo "  make simulate"
+	@echo "  make run_compiler"
+	@echo ""
+
+compile: $(ALL_SV)
+	@echo "Compiling SystemVerilog sources..."
+	$(SIM) $(SIMFLAGS) -o $(SIM_OUT) $(ALL_SV)
+	@echo "Compilation successful!"
+
+simulate: compile
+	@echo "Running simulation..."
+	./$(SIM_OUT)
+	@echo "Simulation complete!"
+	@echo ""
+	@echo "View waveforms with: gtkwave $(VCD_FILE)"
+
+run_compiler:
+	@echo "Running stamp compiler..."
+	$(PYTHON) stamp_compiler.py
+	@echo ""
+	@echo "Compiler output saved to stamp_metadata.json"
+	@echo ""
+	@if [ -f stamp_metadata.json ]; then \
+		echo "Metadata preview:"; \
+		head -20 stamp_metadata.json; \
+		echo "..."; \
+		echo "(Full metadata in stamp_metadata.json)"; \
+	fi
+
+clean:
+	@echo "Cleaning generated files..."
+	rm -f $(SIM_OUT)
+	rm -f $(VCD_FILE)
+	rm -f stamp_metadata.json
+	rm -f *.vcd
+	rm -f *.out
+	@echo "Clean complete!"
+
+# Lint target (if verilator is available)
+lint:
+	@echo "Linting SystemVerilog files..."
+	@which verilator > /dev/null 2>&1 || (echo "verilator not found, skipping lint" && exit 0)
+	verilator --lint-only -Wall $(PKG_FILES) $(RTL_FILES)
+	@echo "Lint complete!"
+
+# Statistics
+stats: run_compiler
+	@echo ""
+	@echo "====================================================="
+	@echo "Stamp Compiler Statistics"
+	@echo "====================================================="
+	@if [ -f stamp_metadata.json ]; then \
+		echo "Phases: $$(grep -c '"phase_id"' stamp_metadata.json)"; \
+		echo "Deltas: $$(grep -c '"from_phase"' stamp_metadata.json)"; \
+		echo "Total operations: $$(grep -c '"op_type"' stamp_metadata.json)"; \
+	fi
+	@echo "====================================================="
