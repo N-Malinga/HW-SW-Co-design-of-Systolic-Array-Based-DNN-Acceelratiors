@@ -30,7 +30,7 @@ module advanced_task_scheduler #(
     output logic [TASK_ID_WIDTH-1:0] scheduled_task_id,
     output logic [BURST_TIME_WIDTH-1:0] scheduled_burst_time,
     output logic [PRIORITY_WIDTH-1:0] scheduled_priority,
-    input  logic task_tick,              // Indicates 1 time unit of execution
+    input  logic task_tick,        // Indicates 1 time unit of execution for the current running task
     input  logic task_complete,
     
     // Status
@@ -212,9 +212,9 @@ module advanced_task_scheduler #(
         automatic logic [$clog2(NUM_QUEUES)-1:0] highest_queue = NUM_QUEUES - 1;
         
         // Find highest priority queue with tasks
-        for (int q = NUM_QUEUES - 1; q >= 0; q--) begin
+        for (int q = NUM_QUEUES - 1; q >= 0; q--) begin    //q is an integer (32-bit by default)
             for (int i = 0; i < num_tasks; i++) begin
-                if (task_queue[i].queue_level == q[$clog2(NUM_QUEUES)-1:0]) begin
+                if (task_queue[i].queue_level == q[$clog2(NUM_QUEUES)-1:0]) begin   //Take only the lower bits of q so it matches the size of queue_level
                     selected_idx = i;
                     break;
                 end
