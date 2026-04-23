@@ -49,7 +49,8 @@ module multi_scheduler_wrapper #(
     output logic [31:0] total_turnaround_time
 );
 
-    // Intermediate signals for basic schedulers
+    // These signals are intermediate wires used to carry outputs from the basic schedulers
+    // never used
     logic basic_task_ready;
     logic basic_scheduled_valid;
     logic [TASK_ID_WIDTH-1:0] basic_scheduled_id;
@@ -71,20 +72,20 @@ module multi_scheduler_wrapper #(
     logic adv_queue_empty;
     
     // Instantiate all basic schedulers
-    genvar i;
-    generate
-        for (i = 0; i < 7; i++) begin : gen_basic_schedulers
-            task_scheduler #(
-                .MAX_TASKS(MAX_TASKS),
+    genvar i;   //genvar is not a runtime , It is used only during compilation (elaboration time) / The loop runs once during synthesis, not during execution
+    generate    //generate is a construct used to replicate hardware structures
+        for (i = 0; i < 7; i++) begin : gen_basic_schedulers  //This gives a name , That created an array of instances
+            task_scheduler #(     //This is a single instance of task_scheduler module
+                .MAX_TASKS(MAX_TASKS),            //Configuring the scheduler (parameters)
                 .TASK_ID_WIDTH(TASK_ID_WIDTH),
                 .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
                 .PRIORITY_WIDTH(PRIORITY_WIDTH),
                 .DEADLINE_WIDTH(DEADLINE_WIDTH),
                 .TIME_QUANTUM(TIME_QUANTUM),
                 .SCHEDULER_TYPE(i)
-            ) basic_sched (
-                .clk(clk),
-                .rst_n(rst_n && (scheduler_select == i)),
+            ) basic_sched (        //instance_name (connections)
+                .clk(clk),  //Connecting signals (ports)
+                .rst_n(rst_n && (scheduler_select == i)),    //Only active scheduler gets reset
                 .task_valid(task_valid && (scheduler_select == i)),
                 .task_id(task_id),
                 .burst_time(burst_time),
@@ -138,7 +139,7 @@ module multi_scheduler_wrapper #(
     endgenerate
     
     // Output multiplexing based on scheduler selection
-    always_comb begin
+    always_comb begin   // Pure combinational logic , Triggered by any change in inputs
         if (scheduler_select < 7) begin
             // Basic schedulers
             task_ready = gen_basic_schedulers[scheduler_select].basic_sched.task_ready;
@@ -157,7 +158,7 @@ module multi_scheduler_wrapper #(
             scheduled_task_id = gen_advanced_schedulers[scheduler_select - 7].adv_sched.scheduled_task_id;
             scheduled_burst_time = gen_advanced_schedulers[scheduler_select - 7].adv_sched.scheduled_burst_time;
             scheduled_priority = gen_advanced_schedulers[scheduler_select - 7].adv_sched.scheduled_priority;
-            scheduled_deadline = 'x;  // Advanced schedulers don't output deadline
+            scheduled_deadline = 'x;  // Advanced schedulers don't output deadline (unknown value)
             queue_count = gen_advanced_schedulers[scheduler_select - 7].adv_sched.queue_count;
             queue_full = gen_advanced_schedulers[scheduler_select - 7].adv_sched.queue_full;
             queue_empty = gen_advanced_schedulers[scheduler_select - 7].adv_sched.queue_empty;
@@ -175,17 +176,19 @@ module multi_scheduler_wrapper #(
     end
     
     // Statistics collection
+    //creating a custom data type named task_stats_t
     typedef struct {
         logic [TASK_ID_WIDTH-1:0] id;
         logic [31:0] arrival_time;
         logic [31:0] completion_time;
     } task_stats_t;
     
-    task_stats_t task_stats [255:0];
-    logic [7:0] stats_write_ptr;
-    logic [7:0] stats_read_ptr;
-    logic [31:0] current_time;
+    task_stats_t task_stats [255:0];  //array of 256 tasks
+    logic [7:0] stats_write_ptr;   //Tells where to store the next incoming task’s data in the task_stats array
+    logic [7:0] stats_read_ptr;   //Used to read or process stored task statistics
+    logic [31:0] current_time;    //This is a global time counter
     
+    //It runs on every clock and keeps track of time, task arrivals, and task completions.
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             total_tasks_processed <= '0;
@@ -198,15 +201,15 @@ module multi_scheduler_wrapper #(
             current_time <= current_time + 1;
             
             // Record task arrival
-            if (task_valid && task_ready) begin
+            if (task_valid && task_ready) begin //(A new task is coming && Scheduler can accept it)
                 task_stats[stats_write_ptr].id <= task_id;
                 task_stats[stats_write_ptr].arrival_time <= current_time;
-                stats_write_ptr <= stats_write_ptr + 1;
+                stats_write_ptr <= stats_write_ptr + 1;   //move pointer to next slot
             end
             
             // Record task completion
             if (task_complete && scheduled_task_valid) begin
-                automatic logic [31:0] turnaround, wait_time;
+                automatic logic [31:0] turnaround, wait_time;  //Temporary (local) variables for calculation
                 
                 // Find the task in stats
                 for (int k = 0; k < 256; k++) begin
