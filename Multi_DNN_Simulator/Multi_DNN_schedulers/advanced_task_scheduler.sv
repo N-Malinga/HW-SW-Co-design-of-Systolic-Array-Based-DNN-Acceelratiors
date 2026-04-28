@@ -7,7 +7,7 @@
 
 module advanced_task_scheduler #(
     parameter MAX_TASKS = 16,
-    parameter TASK_ID_WIDTH = 8,
+    parameter TASK_ID_WIDTH = 8,        // default bit-width for task IDs
     parameter BURST_TIME_WIDTH = 16,
     parameter PRIORITY_WIDTH = 4,
     parameter DEADLINE_WIDTH = 32,
@@ -30,7 +30,7 @@ module advanced_task_scheduler #(
     output logic [TASK_ID_WIDTH-1:0] scheduled_task_id,
     output logic [BURST_TIME_WIDTH-1:0] scheduled_burst_time,
     output logic [PRIORITY_WIDTH-1:0] scheduled_priority,
-    input  logic task_tick,        // Indicates 1 time unit of execution for the current running task
+    input  logic task_tick,        // one time unit has passed for the currently running task
     input  logic task_complete,
     
     // Status

@@ -14,6 +14,9 @@ module task_scheduler #(
     parameter TIME_QUANTUM = 10,        // Time quantum for Round Robin
     parameter SCHEDULER_TYPE = 0        // 0:FIFO, 1:LIFO, 2:SJF, 3:RR, 4:Priority, 5:EDF, 6:LRU
 )(
+
+    //Inputs = pins that receive signals into the chip
+    //Outputs = pins that send signals out of the chip
     input  logic clk,
     input  logic rst_n,
     

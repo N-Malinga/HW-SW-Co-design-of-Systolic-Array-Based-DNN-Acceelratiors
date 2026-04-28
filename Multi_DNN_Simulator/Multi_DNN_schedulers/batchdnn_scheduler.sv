@@ -27,9 +27,9 @@ module batchdnn_scheduler #(
     parameter DNN_ID_WIDTH    = 4,
     parameter BATCH_WIDTH     = 8,    // max batch size representable
     parameter ONCHIP_MEM_SIZE = 44*1024*1024,
-    parameter WORD_BITS       = 16,
-    parameter COMPUTE_BAL_THRESH = 1000,
-    parameter STACK_DEPTH     = 16,   // sub-batch stack depth per DNN
+    parameter WORD_BITS       = 16,   // each memory word is 2 bytes.
+    parameter COMPUTE_BAL_THRESH = 1000,  // balance threshold for preferring compute over memory (cycles)
+    parameter STACK_DEPTH     = 16,   // the maximum number of paused sub-batches that can be stored for each DNN.
     parameter CYCLE_WIDTH     = 32,
     parameter MEM_WIDTH       = 32
 )(
@@ -42,13 +42,13 @@ module batchdnn_scheduler #(
     input  logic                       st_write_en,
     input  logic [LAYER_ID_WIDTH-1:0]  st_layer_idx,
     input  logic [DNN_ID_WIDTH-1:0]    st_dnn_id,
-    input  logic [LAYER_ID_WIDTH-1:0]  st_prev_layer,
-    input  logic [CYCLE_WIDTH-1:0]     st_mem_cycles,
-    input  logic [CYCLE_WIDTH-1:0]     st_compute_cycles,    // per-unit-batch
-    input  logic [MEM_WIDTH-1:0]       st_weight_fp,         // per-unit-batch (bytes)
-    input  logic [MEM_WIDTH-1:0]       st_ifmap_fp,          // per-unit-batch
-    input  logic [MEM_WIDTH-1:0]       st_ofmap_fp,          // per-unit-batch
-    input  logic [BATCH_WIDTH-1:0]     st_initial_batch,     // requested batch size
+    input  logic [LAYER_ID_WIDTH-1:0]  st_prev_layer,        // previous-layer dependency field for the loaded layer.
+    input  logic [CYCLE_WIDTH-1:0]     st_mem_cycles,        // how many memory cycles are needed to load this layer’s data for one unit batch.
+    input  logic [CYCLE_WIDTH-1:0]     st_compute_cycles,    // how many compute cycles are needed for one unit batch.
+    input  logic [MEM_WIDTH-1:0]       st_weight_fp,         // how many bytes of weight data the layer needs in on-chip memory.
+    input  logic [MEM_WIDTH-1:0]       st_ifmap_fp,          // how many bytes of input feature map data this layer needs in on-chip memory.
+    input  logic [MEM_WIDTH-1:0]       st_ofmap_fp,          // how many bytes of output feature map data this layer needs in on-chip memory.
+    input  logic [BATCH_WIDTH-1:0]     st_initial_batch,     // requested batch size for that layer when the scheduling table is loaded
     input  logic [LAYER_ID_WIDTH-1:0]  st_total_layers,
 
     // ----------------------------------------------------------------
@@ -72,9 +72,9 @@ module batchdnn_scheduler #(
     // ----------------------------------------------------------------
     // Status / metrics
     // ----------------------------------------------------------------
-    output logic [CYCLE_WIDTH-1:0]    available_memory,
+    output logic [CYCLE_WIDTH-1:0]    available_memory,   // how much on-chip memory is currently free
     output logic                      stall_detected,
-    output logic [CYCLE_WIDTH-1:0]    total_stall_cycles,
+    output logic [CYCLE_WIDTH-1:0]    total_stall_cycles,  // how many cycles the scheduler spent stalled
     output logic [CYCLE_WIDTH-1:0]    total_split_events,
     output logic [CYCLE_WIDTH-1:0]    total_merge_events
 );
@@ -83,7 +83,7 @@ module batchdnn_scheduler #(
     // Scheduling-table entry  (AI-MT base + footprint field)
     // ================================================================
     typedef struct packed {
-        logic                      valid;
+        logic                      valid;                //flag that indicates whether the scheduling-table entry contains valid layer data.
         logic [DNN_ID_WIDTH-1:0]   dnn_id;
         logic [LAYER_ID_WIDTH-1:0] prev_layer;
         logic [CYCLE_WIDTH-1:0]    mem_cycles;
@@ -91,7 +91,7 @@ module batchdnn_scheduler #(
         logic [MEM_WIDTH-1:0]      weight_fp;            // per-unit-batch
         logic [MEM_WIDTH-1:0]      ifmap_fp;
         logic [MEM_WIDTH-1:0]      ofmap_fp;
-        logic [BATCH_WIDTH-1:0]    initial_batch;
+        logic [BATCH_WIDTH-1:0]    initial_batch;        //original batch size requested for that layer
         logic                      mem_access_done_flag;
         logic                      compute_done_flag;
     } sched_entry_t;
@@ -103,13 +103,13 @@ module batchdnn_scheduler #(
     // Sub-batching stack  (one per DNN workload, LIFO)
     // Each entry: {layer_index, sub_batch_size}
     // ================================================================
-    typedef struct packed {
-        logic [LAYER_ID_WIDTH-1:0] layer_idx;
-        logic [BATCH_WIDTH-1:0]    batch_size;
+    typedef struct packed {   // one paused sub-batch entry in the per-DNN stack.
+        logic [LAYER_ID_WIDTH-1:0] layer_idx;        // which layer the deferred sub-batch belongs to
+        logic [BATCH_WIDTH-1:0]    batch_size;       //the size of a deferred sub-batch
     } stack_entry_t;
 
-    stack_entry_t sb_stack [MAX_DNNS-1:0][STACK_DEPTH-1:0];
-    logic [$clog2(STACK_DEPTH):0] sb_sp [MAX_DNNS-1:0];  // stack pointer (0=empty)
+    stack_entry_t sb_stack [MAX_DNNS-1:0][STACK_DEPTH-1:0];   // sb_stack[d][s] , d = DNN ID, s = stack position within that DNN’s stack
+    logic [$clog2(STACK_DEPTH):0] sb_sp [MAX_DNNS-1:0];  // stack pointer array for the sub-batch stacks
 
     // Current batch size being used per DNN
     logic [BATCH_WIDTH-1:0] current_batch [MAX_DNNS-1:0];
@@ -134,14 +134,14 @@ module batchdnn_scheduler #(
     // ================================================================
     // Balance counters
     // ================================================================
-    logic signed [CYCLE_WIDTH:0] mem_cycle_ctr;
-    logic signed [CYCLE_WIDTH:0] compute_cycle_ctr;
-    logic [CYCLE_WIDTH-1:0]      cycles_to_fill_remaining;
+    logic signed [CYCLE_WIDTH:0] mem_cycle_ctr;         // current pending memory-cycle load in the MT scheduler
+    logic signed [CYCLE_WIDTH:0] compute_cycle_ctr;     // current pending compute-cycle load in the MT scheduler
+    logic [CYCLE_WIDTH-1:0]      cycles_to_fill_remaining;  // how many cycles of memory load can still be scheduled before on-chip memory is full
 
     // ================================================================
     // Available memory
     // ================================================================
-    logic [CYCLE_WIDTH-1:0] avail_mem_reg;
+    logic [CYCLE_WIDTH-1:0] avail_mem_reg;           // current available on-chip memory budget
     assign available_memory = avail_mem_reg;
 
     // ================================================================
