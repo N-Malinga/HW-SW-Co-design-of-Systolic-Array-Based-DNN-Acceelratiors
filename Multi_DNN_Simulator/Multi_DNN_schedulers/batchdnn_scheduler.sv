@@ -109,7 +109,7 @@ module batchdnn_scheduler #(
     } stack_entry_t;
 
     stack_entry_t sb_stack [MAX_DNNS-1:0][STACK_DEPTH-1:0];   // sb_stack[d][s] , d = DNN ID, s = stack position within that DNN’s stack
-    logic [$clog2(STACK_DEPTH):0] sb_sp [MAX_DNNS-1:0];  // stack pointer array for the sub-batch stacks
+    logic [$clog2(STACK_DEPTH):0] sb_sp [MAX_DNNS-1:0];  // stack pointer array for the sub-batch stacks - sb_sp[0] = A 4-bit register (e.g., 4'b0000) acting as the stack pointer for DNN 0.
 
     // Current batch size being used per DNN
     logic [BATCH_WIDTH-1:0] current_batch [MAX_DNNS-1:0];
@@ -135,7 +135,7 @@ module batchdnn_scheduler #(
     // Balance counters
     // ================================================================
     logic signed [CYCLE_WIDTH:0] mem_cycle_ctr;         // current pending memory-cycle load in the MT scheduler
-    logic signed [CYCLE_WIDTH:0] compute_cycle_ctr;     // current pending compute-cycle load in the MT scheduler
+    logic signed [CYCLE_WIDTH:0] compute_cycle_ctr;     // current pending compute-cycle load in the CT scheduler
     logic [CYCLE_WIDTH-1:0]      cycles_to_fill_remaining;  // how many cycles of memory load can still be scheduled before on-chip memory is full
 
     // ================================================================
@@ -171,18 +171,19 @@ module batchdnn_scheduler #(
     // Constraint 2: batch <= previous layer's batch
     // (Section 3.4.2, box 17)
     // ================================================================
-    function automatic logic [BATCH_WIDTH-1:0] max_batch_size(
-        input logic [MEM_WIDTH-1:0]   ofmap_fp_unit,
-        input logic [CYCLE_WIDTH-1:0] avail_mem,
-        input logic [BATCH_WIDTH-1:0] prev_b
+    // calculates the maximum batch size that can be scheduled or processed at a given moment
+    function automatic logic [BATCH_WIDTH-1:0] max_batch_size(   // automatic : function's internal variables are dynamically allocated each time it is called.
+        input logic [MEM_WIDTH-1:0]   ofmap_fp_unit,     // How much memory (Output Feature Map) is required for one unit of the batch.
+        input logic [CYCLE_WIDTH-1:0] avail_mem,         // The currently available on-chip memory.
+        input logic [BATCH_WIDTH-1:0] prev_b           // The batch size of the previous layer.
     );
         automatic logic [BATCH_WIDTH-1:0] b;
-        if (ofmap_fp_unit == 0) begin
+        if (ofmap_fp_unit == 0) begin    // Division by Zero Protection, could happen for certain layer types that don't produce standard OFMAPs
             max_batch_size = prev_b;
         end else begin
             // integer division
-            b = avail_mem / ofmap_fp_unit;
-            if (b > prev_b) b = prev_b;
+            b = avail_mem / ofmap_fp_unit;   // calculates how many batch elements can actually fit into the available memory
+            if (b > prev_b) b = prev_b;    // ensures the batch size doesn't exceed the requested limit
             max_batch_size = b;
         end
     endfunction
@@ -237,6 +238,7 @@ module batchdnn_scheduler #(
     // ================================================================
     // Main scheduler state machine
     // ================================================================
+    // memory scheduling, compute scheduling, splitting, merging, and memory release
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             avail_mem_reg            <= ONCHIP_MEM_SIZE;
@@ -257,7 +259,7 @@ module batchdnn_scheduler #(
             if (!mt_active && mt_cq_cnt > 0) begin
                 automatic logic [LAYER_ID_WIDTH-1:0] cand;
                 automatic logic [MEM_WIDTH-1:0]      mem_req;
-                automatic logic                      do_sched;
+                automatic logic                      do_sched;   // 0 → don’t schedule, 1 → schedule this task 
 
                 cand     = mt_cq[mt_cq_head];
                 do_sched = 1'b0;
@@ -269,12 +271,13 @@ module batchdnn_scheduler #(
                     mem_req = sched_table[cand].weight_fp +
                               (sched_table[cand].ifmap_fp  +
                                sched_table[cand].ofmap_fp) *
-                              current_batch[sched_table[cand].dnn_id];
+                              current_batch[sched_table[cand].dnn_id];  // Only loaded once → no multiplication, Each input needs its own memory → multiply by batch size
 
+                    // Should I schedule this memory task now, or wait?
                     if (sched_table[cand].mem_cycles <= cycles_to_fill_remaining &&
                         mem_req <= avail_mem_reg) begin
-                        if (compute_cycle_ctr > COMPUTE_BAL_THRESH ||
-                            sched_table[cand].mem_cycles <= compute_cycle_ctr) begin
+                        if (compute_cycle_ctr > COMPUTE_BAL_THRESH ||                      // Compute side is busy → better feed it with memory
+                            sched_table[cand].mem_cycles <= compute_cycle_ctr) begin       // Memory won’t overload the system
                             do_sched = 1'b1;
                         end
                     end
