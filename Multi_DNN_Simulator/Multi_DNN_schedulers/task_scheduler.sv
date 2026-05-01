@@ -8,12 +8,15 @@
 module task_scheduler #(
     parameter MAX_TASKS = 16,           // Maximum number of tasks in queue
     parameter TASK_ID_WIDTH = 8,        // Width of task ID
-    parameter BURST_TIME_WIDTH = 16,    // Width of burst time field
+    parameter BURST_TIME_WIDTH = 16,    // Width of burst time (execution time) field
     parameter PRIORITY_WIDTH = 4,       // Width of priority field
     parameter DEADLINE_WIDTH = 32,      // Width of deadline field
     parameter TIME_QUANTUM = 10,        // Time quantum for Round Robin
     parameter SCHEDULER_TYPE = 0        // 0:FIFO, 1:LIFO, 2:SJF, 3:RR, 4:Priority, 5:EDF, 6:LRU
 )(
+
+    //Inputs = pins that receive signals into the chip
+    //Outputs = pins that send signals out of the chip
     input  logic clk,
     input  logic rst_n,
     
@@ -23,25 +26,28 @@ module task_scheduler #(
     input  logic [BURST_TIME_WIDTH-1:0] burst_time,
     input  logic [PRIORITY_WIDTH-1:0] priority,
     input  logic [DEADLINE_WIDTH-1:0] deadline,
-    output logic task_ready,
+
+    output logic task_ready,  //Scheduler can accept new task
     
     // Scheduler output
-    output logic scheduled_task_valid,
+    output logic scheduled_task_valid,   //Output task is valid
     output logic [TASK_ID_WIDTH-1:0] scheduled_task_id,
     output logic [BURST_TIME_WIDTH-1:0] scheduled_burst_time,
     output logic [PRIORITY_WIDTH-1:0] scheduled_priority,
     output logic [DEADLINE_WIDTH-1:0] scheduled_deadline,
-    input  logic task_complete,
+
+    input  logic task_complete,   //Current task finished
     
     // Status outputs
-    output logic [$clog2(MAX_TASKS):0] queue_count,
+    output logic [$clog2(MAX_TASKS):0] queue_count,  //$clog2(How many bits are needed to represent a number)
     output logic queue_full,
     output logic queue_empty
 );
 
     // Task structure
-    typedef struct packed {
-        logic valid;
+    // custom data type called task_t
+    typedef struct packed {    //struct = group of variables, packed = stored as continuous bits
+        logic valid;  //is job active
         logic [TASK_ID_WIDTH-1:0] id;
         logic [BURST_TIME_WIDTH-1:0] burst_time;
         logic [BURST_TIME_WIDTH-1:0] remaining_time;
@@ -52,20 +58,20 @@ module task_scheduler #(
     } task_t;
     
     // Task queue
-    task_t task_queue [MAX_TASKS-1:0];
-    logic [$clog2(MAX_TASKS):0] num_tasks;
-    logic [DEADLINE_WIDTH-1:0] current_time;
-    logic [BURST_TIME_WIDTH-1:0] quantum_counter;
-    logic task_running;
+    task_t task_queue [MAX_TASKS-1:0];   //Array of tasks (queue) , task_queue[0], task_queue[1], ..., task_queue[MAX_TASKS-1]
+    logic [$clog2(MAX_TASKS):0] num_tasks; //Number of tasks currently in queue [4:0]  → 5 bits
+    logic [DEADLINE_WIDTH-1:0] current_time; //Global time counter for scheduling decisions
+    logic [BURST_TIME_WIDTH-1:0] quantum_counter; //Counter for Round Robin time quantum
+    logic task_running; 
     
     // Status signals
-    assign queue_count = num_tasks;
+    assign queue_count = num_tasks; //Update automatically when num_tasks changes  , num_tasks → internal counter , queue_count → output port
     assign queue_full = (num_tasks == MAX_TASKS);
     assign queue_empty = (num_tasks == 0);
     assign task_ready = !queue_full;
     
     // Current time counter
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk or negedge rst_n) begin  //sequential logic (flip-flop) , trigger on ising edge or negative edge of reset
         if (!rst_n)
             current_time <= '0;
         else
@@ -73,16 +79,17 @@ module task_scheduler #(
     end
     
     // Task insertion logic
+    // Reset + Adding tasks + Removing tasks + Updating LRU
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+        if (!rst_n) begin  //When reset is active:
             num_tasks <= '0;
-            for (int i = 0; i < MAX_TASKS; i++) begin
+            for (int i = 0; i < MAX_TASKS; i++) begin  //Clear entire queue
                 task_queue[i] <= '0;
             end
         end else begin
             // Handle new task arrival
             if (task_valid && !queue_full) begin
-                task_queue[num_tasks].valid <= 1'b1;
+                task_queue[num_tasks].valid <= 1'b1;  //<size>'<base><value>
                 task_queue[num_tasks].id <= task_id;
                 task_queue[num_tasks].burst_time <= burst_time;
                 task_queue[num_tasks].remaining_time <= burst_time;
@@ -100,7 +107,7 @@ module task_scheduler #(
                     if (i < num_tasks - 1)
                         task_queue[i] <= task_queue[i+1];
                 end
-                task_queue[num_tasks-1] <= '0;
+                task_queue[num_tasks-1] <= '0;  //Clear Last Slot
                 num_tasks <= num_tasks - 1;
             end
             
@@ -115,14 +122,14 @@ module task_scheduler #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             scheduled_task_valid <= 1'b0;
-            scheduled_task_id <= '0;
+            scheduled_task_id <= '0;  //Set ALL bits to 0 , eg: 8'b00000000
             scheduled_burst_time <= '0;
             scheduled_priority <= '0;
             scheduled_deadline <= '0;
             quantum_counter <= '0;
             task_running <= 1'b0;
         end else begin
-            if (!queue_empty) begin
+            if (!queue_empty) begin   //If there are tasks in queue
                 case (SCHEDULER_TYPE)
                     0: schedule_fifo();
                     1: schedule_lifo();
@@ -160,7 +167,7 @@ module task_scheduler #(
     
     // SJF Scheduler (Shortest Job First)
     task schedule_sjf();
-        automatic int shortest_idx = 0;
+        automatic int shortest_idx = 0;  //Create a new fresh variable every time the task/function runs
         automatic logic [BURST_TIME_WIDTH-1:0] min_time = task_queue[0].burst_time;
         
         for (int i = 1; i < num_tasks; i++) begin
