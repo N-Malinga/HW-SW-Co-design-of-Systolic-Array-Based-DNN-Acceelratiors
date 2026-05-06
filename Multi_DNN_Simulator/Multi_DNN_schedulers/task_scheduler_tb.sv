@@ -26,7 +26,7 @@ module task_scheduler_tb;
     logic task_valid;   //Indicates that the sender (testbench) has placed a valid task on the input signals.
     logic [TASK_ID_WIDTH-1:0] task_id;
     logic [BURST_TIME_WIDTH-1:0] burst_time;
-    logic [PRIORITY_WIDTH-1:0] priority;
+    logic [PRIORITY_WIDTH-1:0] task_priority;
     logic [DEADLINE_WIDTH-1:0] deadline;
     logic task_ready;   //Indicates that the receiver (scheduler) is ready to accept a task
     
@@ -48,6 +48,8 @@ module task_scheduler_tb;
     int tasks_completed = 0;
     int scheduler_type;
     
+    localparam TEST_SCHEDULER_TYPE = 1; // 0:FIFO, 1:LIFO, 2:SJF, etc.
+    
     // (Device Under Test) instances for different schedulers
     // This creates a FIFO scheduler hardware instance inside the testbench and connects all matching signals automatically.
     task_scheduler #(
@@ -57,68 +59,68 @@ module task_scheduler_tb;
         .PRIORITY_WIDTH(PRIORITY_WIDTH),
         .DEADLINE_WIDTH(DEADLINE_WIDTH),
         .TIME_QUANTUM(TIME_QUANTUM),
-        .SCHEDULER_TYPE(0)  // FIFO
+        .SCHEDULER_TYPE(TEST_SCHEDULER_TYPE)  // FIFO
     ) dut_fifo (.*);    //(.*) - implicit port connection - Connect all signals with matching names automatically
     
-    task_scheduler #(
-        .MAX_TASKS(MAX_TASKS),
-        .TASK_ID_WIDTH(TASK_ID_WIDTH),
-        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
-        .PRIORITY_WIDTH(PRIORITY_WIDTH),
-        .DEADLINE_WIDTH(DEADLINE_WIDTH),
-        .TIME_QUANTUM(TIME_QUANTUM),
-        .SCHEDULER_TYPE(1)  // LIFO
-    ) dut_lifo (.*);
+//    task_scheduler #(
+//        .MAX_TASKS(MAX_TASKS),
+//        .TASK_ID_WIDTH(TASK_ID_WIDTH),
+//        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
+//        .PRIORITY_WIDTH(PRIORITY_WIDTH),
+//        .DEADLINE_WIDTH(DEADLINE_WIDTH),
+//        .TIME_QUANTUM(TIME_QUANTUM),
+//        .SCHEDULER_TYPE(1)  // LIFO
+//    ) dut_lifo (.*);
     
-    task_scheduler #(
-        .MAX_TASKS(MAX_TASKS),
-        .TASK_ID_WIDTH(TASK_ID_WIDTH),
-        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
-        .PRIORITY_WIDTH(PRIORITY_WIDTH),
-        .DEADLINE_WIDTH(DEADLINE_WIDTH),
-        .TIME_QUANTUM(TIME_QUANTUM),
-        .SCHEDULER_TYPE(2)  // SJF
-    ) dut_sjf (.*);
+//    task_scheduler #(
+//        .MAX_TASKS(MAX_TASKS),
+//        .TASK_ID_WIDTH(TASK_ID_WIDTH),
+//        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
+//        .PRIORITY_WIDTH(PRIORITY_WIDTH),
+//        .DEADLINE_WIDTH(DEADLINE_WIDTH),
+//        .TIME_QUANTUM(TIME_QUANTUM),
+//        .SCHEDULER_TYPE(2)  // SJF
+//    ) dut_sjf (.*);
     
-    task_scheduler #(
-        .MAX_TASKS(MAX_TASKS),
-        .TASK_ID_WIDTH(TASK_ID_WIDTH),
-        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
-        .PRIORITY_WIDTH(PRIORITY_WIDTH),
-        .DEADLINE_WIDTH(DEADLINE_WIDTH),
-        .TIME_QUANTUM(TIME_QUANTUM),
-        .SCHEDULER_TYPE(3)  // Round Robin
-    ) dut_rr (.*);
+//    task_scheduler #(
+//        .MAX_TASKS(MAX_TASKS),
+//        .TASK_ID_WIDTH(TASK_ID_WIDTH),
+//        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
+//        .PRIORITY_WIDTH(PRIORITY_WIDTH),
+//        .DEADLINE_WIDTH(DEADLINE_WIDTH),
+//        .TIME_QUANTUM(TIME_QUANTUM),
+//        .SCHEDULER_TYPE(3)  // Round Robin
+//    ) dut_rr (.*);
     
-    task_scheduler #(
-        .MAX_TASKS(MAX_TASKS),
-        .TASK_ID_WIDTH(TASK_ID_WIDTH),
-        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
-        .PRIORITY_WIDTH(PRIORITY_WIDTH),
-        .DEADLINE_WIDTH(DEADLINE_WIDTH),
-        .TIME_QUANTUM(TIME_QUANTUM),
-        .SCHEDULER_TYPE(4)  // Priority
-    ) dut_priority (.*);
+//    task_scheduler #(
+//        .MAX_TASKS(MAX_TASKS),
+//        .TASK_ID_WIDTH(TASK_ID_WIDTH),
+//        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
+//        .PRIORITY_WIDTH(PRIORITY_WIDTH),
+//        .DEADLINE_WIDTH(DEADLINE_WIDTH),
+//        .TIME_QUANTUM(TIME_QUANTUM),
+//        .SCHEDULER_TYPE(4)  // Priority
+//    ) dut_priority (.*);
     
-    task_scheduler #(
-        .MAX_TASKS(MAX_TASKS),
-        .TASK_ID_WIDTH(TASK_ID_WIDTH),
-        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
-        .PRIORITY_WIDTH(PRIORITY_WIDTH),
-        .DEADLINE_WIDTH(DEADLINE_WIDTH),
-        .TIME_QUANTUM(TIME_QUANTUM),
-        .SCHEDULER_TYPE(5)  // EDF
-    ) dut_edf (.*);
+//    task_scheduler #(
+//        .MAX_TASKS(MAX_TASKS),
+//        .TASK_ID_WIDTH(TASK_ID_WIDTH),
+//        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
+//        .PRIORITY_WIDTH(PRIORITY_WIDTH),
+//        .DEADLINE_WIDTH(DEADLINE_WIDTH),
+//        .TIME_QUANTUM(TIME_QUANTUM),
+//        .SCHEDULER_TYPE(5)  // EDF
+//    ) dut_edf (.*);
     
-    task_scheduler #(
-        .MAX_TASKS(MAX_TASKS),
-        .TASK_ID_WIDTH(TASK_ID_WIDTH),
-        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
-        .PRIORITY_WIDTH(PRIORITY_WIDTH),
-        .DEADLINE_WIDTH(DEADLINE_WIDTH),
-        .TIME_QUANTUM(TIME_QUANTUM),
-        .SCHEDULER_TYPE(6)  // LRU
-    ) dut_lru (.*);
+//    task_scheduler #(
+//        .MAX_TASKS(MAX_TASKS),
+//        .TASK_ID_WIDTH(TASK_ID_WIDTH),
+//        .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
+//        .PRIORITY_WIDTH(PRIORITY_WIDTH),
+//        .DEADLINE_WIDTH(DEADLINE_WIDTH),
+//        .TIME_QUANTUM(TIME_QUANTUM),
+//        .SCHEDULER_TYPE(6)  // LRU
+//    ) dut_lru (.*);
     
     // Clock generation
     initial begin    //Run this block of code once at the start of simulation.  , Executes sequentially , Does not repeat
@@ -142,7 +144,7 @@ module task_scheduler_tb;
         task_valid = 0;
         task_id = 0;
         burst_time = 0;
-        priority = 0;
+        task_priority = 0;
         deadline = 0;
         task_complete = 0;
         
@@ -151,20 +153,35 @@ module task_scheduler_tb;
         rst_n = 1;     //reset released
         repeat(2) @(posedge clk);  //Wait 2 additional clock cycles after reset is released
         
+        test_scheduler(get_scheduler_name(TEST_SCHEDULER_TYPE), TEST_SCHEDULER_TYPE);
+        
         // Test each scheduler
-        test_scheduler("FIFO", 0);
-        test_scheduler("LIFO", 1);
-        test_scheduler("SJF", 2);
-        test_scheduler("Round Robin", 3);
-        test_scheduler("Priority", 4);
-        test_scheduler("EDF", 5);
-        test_scheduler("LRU", 6);
+//        test_scheduler("FIFO", 0);
+//        test_scheduler("LIFO", 1);
+//        test_scheduler("SJF", 2);
+//        test_scheduler("Round Robin", 3);
+//        test_scheduler("Priority", 4);
+//        test_scheduler("EDF", 5);
+//        test_scheduler("LRU", 6);
         
         $display("\n====================================================");
         $display("All tests completed successfully!");
         $display("====================================================");
         $finish;
     end
+    
+    function string get_scheduler_name(int sched_type);
+        case(sched_type)
+            0: return "FIFO";
+            1: return "LIFO";
+            2: return "SJF";
+            3: return "Round Robin";
+            4: return "Priority";
+            5: return "EDF";
+            6: return "LRU";
+            default: return "Unknown";
+        endcase
+    endfunction
     
     // Task to test a specific scheduler
     // This simulated a realistic system where (1). task arrive randomly, (2). The schedular picks tasks, (3). Tasks execute and complete
@@ -199,11 +216,11 @@ module task_scheduler_tb;
                     task_valid = 1;
                     task_id = i;
                     burst_time = $urandom_range(5, 50);
-                    priority = $urandom_range(0, 15);
+                    task_priority = $urandom_range(0, 15);
                     deadline = $urandom_range(100, 1000);
                     
                     $display("[%0t] Submitting Task %0d: Burst=%0d, Priority=%0d, Deadline=%0d", 
-                             $time, task_id, burst_time, priority, deadline);      //%0t - print time, %0d - print decimal without leading zeros
+                             $time, task_id, burst_time, task_priority, deadline);      //%0t - print time, %0d - print decimal without leading zeros
                     
                     @(posedge clk);  //// 2nd
                     task_valid = 0;
@@ -267,3 +284,4 @@ module task_scheduler_tb;
     end
 
 endmodule
+
