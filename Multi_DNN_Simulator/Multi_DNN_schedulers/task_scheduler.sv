@@ -24,7 +24,7 @@ module task_scheduler #(
     input  logic task_valid,
     input  logic [TASK_ID_WIDTH-1:0] task_id,
     input  logic [BURST_TIME_WIDTH-1:0] burst_time,
-    input  logic [PRIORITY_WIDTH-1:0] priority,
+    input  logic [PRIORITY_WIDTH-1:0] task_priority,
     input  logic [DEADLINE_WIDTH-1:0] deadline,
 
     output logic task_ready,  //Scheduler can accept new task
@@ -51,7 +51,7 @@ module task_scheduler #(
         logic [TASK_ID_WIDTH-1:0] id;
         logic [BURST_TIME_WIDTH-1:0] burst_time;
         logic [BURST_TIME_WIDTH-1:0] remaining_time;
-        logic [PRIORITY_WIDTH-1:0] priority;
+        logic [PRIORITY_WIDTH-1:0] task_priority;
         logic [DEADLINE_WIDTH-1:0] deadline;
         logic [DEADLINE_WIDTH-1:0] arrival_time;
         logic [DEADLINE_WIDTH-1:0] last_access_time;
@@ -93,7 +93,7 @@ module task_scheduler #(
                 task_queue[num_tasks].id <= task_id;
                 task_queue[num_tasks].burst_time <= burst_time;
                 task_queue[num_tasks].remaining_time <= burst_time;
-                task_queue[num_tasks].priority <= priority;
+                task_queue[num_tasks].task_priority <= task_priority;
                 task_queue[num_tasks].deadline <= deadline;
                 task_queue[num_tasks].arrival_time <= current_time;
                 task_queue[num_tasks].last_access_time <= current_time;
@@ -152,7 +152,7 @@ module task_scheduler #(
         scheduled_task_valid <= 1'b1;
         scheduled_task_id <= task_queue[0].id;
         scheduled_burst_time <= task_queue[0].burst_time;
-        scheduled_priority <= task_queue[0].priority;
+        scheduled_priority <= task_queue[0].task_priority;
         scheduled_deadline <= task_queue[0].deadline;
     endtask
     
@@ -161,7 +161,7 @@ module task_scheduler #(
         scheduled_task_valid <= 1'b1;
         scheduled_task_id <= task_queue[num_tasks-1].id;
         scheduled_burst_time <= task_queue[num_tasks-1].burst_time;
-        scheduled_priority <= task_queue[num_tasks-1].priority;
+        scheduled_priority <= task_queue[num_tasks-1].task_priority;
         scheduled_deadline <= task_queue[num_tasks-1].deadline;
     endtask
     
@@ -180,7 +180,7 @@ module task_scheduler #(
         scheduled_task_valid <= 1'b1;
         scheduled_task_id <= task_queue[shortest_idx].id;
         scheduled_burst_time <= task_queue[shortest_idx].burst_time;
-        scheduled_priority <= task_queue[shortest_idx].priority;
+        scheduled_priority <= task_queue[shortest_idx].task_priority;
         scheduled_deadline <= task_queue[shortest_idx].deadline;
         
         // Move shortest task to front
@@ -201,7 +201,7 @@ module task_scheduler #(
         scheduled_task_valid <= 1'b1;
         scheduled_task_id <= task_queue[0].id;
         scheduled_burst_time <= task_queue[0].burst_time;
-        scheduled_priority <= task_queue[0].priority;
+        scheduled_priority <= task_queue[0].task_priority;
         scheduled_deadline <= task_queue[0].deadline;
         
         if (quantum_counter > 0) begin
@@ -221,11 +221,11 @@ module task_scheduler #(
     // Priority Scheduler (Higher priority value = higher priority)
     task schedule_priority();
         automatic int highest_idx = 0;
-        automatic logic [PRIORITY_WIDTH-1:0] max_priority = task_queue[0].priority;
+        automatic logic [PRIORITY_WIDTH-1:0] max_priority = task_queue[0].task_priority;
         
         for (int i = 1; i < num_tasks; i++) begin
-            if (task_queue[i].priority > max_priority) begin
-                max_priority = task_queue[i].priority;
+            if (task_queue[i].task_priority > max_priority) begin
+                max_priority = task_queue[i].task_priority;
                 highest_idx = i;
             end
         end
@@ -233,7 +233,7 @@ module task_scheduler #(
         scheduled_task_valid <= 1'b1;
         scheduled_task_id <= task_queue[highest_idx].id;
         scheduled_burst_time <= task_queue[highest_idx].burst_time;
-        scheduled_priority <= task_queue[highest_idx].priority;
+        scheduled_priority <= task_queue[highest_idx].task_priority;
         scheduled_deadline <= task_queue[highest_idx].deadline;
         
         // Move highest priority task to front
@@ -259,7 +259,7 @@ module task_scheduler #(
         scheduled_task_valid <= 1'b1;
         scheduled_task_id <= task_queue[earliest_idx].id;
         scheduled_burst_time <= task_queue[earliest_idx].burst_time;
-        scheduled_priority <= task_queue[earliest_idx].priority;
+        scheduled_priority <= task_queue[earliest_idx].task_priority;
         scheduled_deadline <= task_queue[earliest_idx].deadline;
         
         // Move earliest deadline task to front
@@ -285,7 +285,7 @@ module task_scheduler #(
         scheduled_task_valid <= 1'b1;
         scheduled_task_id <= task_queue[lru_idx].id;
         scheduled_burst_time <= task_queue[lru_idx].burst_time;
-        scheduled_priority <= task_queue[lru_idx].priority;
+        scheduled_priority <= task_queue[lru_idx].task_priority;
         scheduled_deadline <= task_queue[lru_idx].deadline;
         
         // Move LRU task to front
