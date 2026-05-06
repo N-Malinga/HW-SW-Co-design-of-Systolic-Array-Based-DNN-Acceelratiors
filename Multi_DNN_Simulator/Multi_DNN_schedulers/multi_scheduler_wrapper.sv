@@ -1,225 +1,251 @@
 // ============================================================================
-// Multi-Scheduler Wrapper
-// Allows runtime selection between different scheduling algorithms
+// Multi-Scheduler Wrapper  (fixed for Vivado/XSim)
+// Allows runtime selection between all scheduling algorithms.
+//
+// Fix summary
+// -----------
+// The original always_comb block indexed into generate-block hierarchical
+// paths at run-time (e.g. gen_basic_schedulers[scheduler_select].basic_sched.*)
+// which is illegal in IEEE 1800 - generate-block indices must be elaboration-
+// time constants.  The fix introduces two intermediate signal arrays
+// (basic_* and adv_*) that are driven by the generate loops, then the
+// always_comb block muxes those arrays with the run-time selector.
 // ============================================================================
 
 `timescale 1ns/1ps
 
 module multi_scheduler_wrapper #(
-    parameter MAX_TASKS = 16,
-    parameter TASK_ID_WIDTH = 8,
+    parameter MAX_TASKS        = 16,
+    parameter TASK_ID_WIDTH    = 8,
     parameter BURST_TIME_WIDTH = 16,
-    parameter PRIORITY_WIDTH = 4,
-    parameter DEADLINE_WIDTH = 32,
-    parameter TIME_QUANTUM = 10
+    parameter PRIORITY_WIDTH   = 4,
+    parameter DEADLINE_WIDTH   = 32,
+    parameter TIME_QUANTUM     = 10
 )(
     input  logic clk,
     input  logic rst_n,
-    
-    // Scheduler selection (runtime configurable)
+
+    // Scheduler selection (run-time configurable)
+    // 0-6 : FIFO / LIFO / SJF / RR / Priority / EDF / LRU  (basic)
+    // 7   : SRTF   8 : HRRN   9 : MLQ   10 : MLFQ          (advanced)
     input  logic [3:0] scheduler_select,
-    // 0:FIFO, 1:LIFO, 2:SJF, 3:RR, 4:Priority, 5:EDF, 6:LRU
-    // 7:SRTF, 8:HRRN, 9:MLQ, 10:MLFQ
-    
+
     // Task arrival interface
-    input  logic task_valid,
-    input  logic [TASK_ID_WIDTH-1:0] task_id,
-    input  logic [BURST_TIME_WIDTH-1:0] burst_time,
-    input  logic [PRIORITY_WIDTH-1:0] priority,
-    input  logic [DEADLINE_WIDTH-1:0] deadline,
-    output logic task_ready,
-    
+    input  logic                          task_valid,
+    input  logic [TASK_ID_WIDTH-1:0]      task_id,
+    input  logic [BURST_TIME_WIDTH-1:0]   burst_time,
+    input  logic [PRIORITY_WIDTH-1:0]     task_priority,
+    input  logic [DEADLINE_WIDTH-1:0]     deadline,
+    output logic                          task_ready,
+
     // Scheduler output
-    output logic scheduled_task_valid,
-    output logic [TASK_ID_WIDTH-1:0] scheduled_task_id,
-    output logic [BURST_TIME_WIDTH-1:0] scheduled_burst_time,
-    output logic [PRIORITY_WIDTH-1:0] scheduled_priority,
-    output logic [DEADLINE_WIDTH-1:0] scheduled_deadline,
-    input  logic task_tick,
-    input  logic task_complete,
-    
+    output logic                          scheduled_task_valid,
+    output logic [TASK_ID_WIDTH-1:0]      scheduled_task_id,
+    output logic [BURST_TIME_WIDTH-1:0]   scheduled_burst_time,
+    output logic [PRIORITY_WIDTH-1:0]     scheduled_priority,
+    output logic [DEADLINE_WIDTH-1:0]     scheduled_deadline,
+    input  logic                          task_tick,
+    input  logic                          task_complete,
+
     // Status
-    output logic [$clog2(MAX_TASKS):0] queue_count,
-    output logic queue_full,
-    output logic queue_empty,
-    
+    output logic [$clog2(MAX_TASKS):0]    queue_count,
+    output logic                          queue_full,
+    output logic                          queue_empty,
+
     // Statistics
     output logic [31:0] total_tasks_processed,
     output logic [31:0] total_wait_time,
     output logic [31:0] total_turnaround_time
 );
 
-    // These signals are intermediate wires used to carry outputs from the basic schedulers
-    // never used
-    logic basic_task_ready;
-    logic basic_scheduled_valid;
-    logic [TASK_ID_WIDTH-1:0] basic_scheduled_id;
-    logic [BURST_TIME_WIDTH-1:0] basic_scheduled_burst;
-    logic [PRIORITY_WIDTH-1:0] basic_scheduled_priority;
-    logic [DEADLINE_WIDTH-1:0] basic_scheduled_deadline;
-    logic [$clog2(MAX_TASKS):0] basic_queue_count;
-    logic basic_queue_full;
-    logic basic_queue_empty;
-    
-    // Intermediate signals for advanced schedulers
-    logic adv_task_ready;
-    logic adv_scheduled_valid;
-    logic [TASK_ID_WIDTH-1:0] adv_scheduled_id;
-    logic [BURST_TIME_WIDTH-1:0] adv_scheduled_burst;
-    logic [PRIORITY_WIDTH-1:0] adv_scheduled_priority;
-    logic [$clog2(MAX_TASKS):0] adv_queue_count;
-    logic adv_queue_full;
-    logic adv_queue_empty;
-    
-    // Instantiate all basic schedulers
-    genvar i;   //genvar is not a runtime , It is used only during compilation (elaboration time) / The loop runs once during synthesis, not during execution
-    generate    //generate is a construct used to replicate hardware structures
-        for (i = 0; i < 7; i++) begin : gen_basic_schedulers  //This gives a name , That created an array of instances
-            task_scheduler #(     //This is a single instance of task_scheduler module
-                .MAX_TASKS(MAX_TASKS),            //Configuring the scheduler (parameters)
-                .TASK_ID_WIDTH(TASK_ID_WIDTH),
+    // -------------------------------------------------------------------------
+    // Intermediate arrays - one slot per scheduler instance
+    // These are driven by the generate blocks and muxed below.
+    // -------------------------------------------------------------------------
+
+    // Basic schedulers (indices 0-6)
+    logic                          basic_task_ready      [7];
+    logic                          basic_sched_valid     [7];
+    logic [TASK_ID_WIDTH-1:0]      basic_sched_id        [7];
+    logic [BURST_TIME_WIDTH-1:0]   basic_sched_burst     [7];
+    logic [PRIORITY_WIDTH-1:0]     basic_sched_priority  [7];
+    logic [DEADLINE_WIDTH-1:0]     basic_sched_deadline  [7];
+    logic [$clog2(MAX_TASKS):0]    basic_queue_count     [7];
+    logic                          basic_queue_full      [7];
+    logic                          basic_queue_empty     [7];
+
+    // Advanced schedulers (indices 0-3  →  select offsets 7-10)
+    logic                          adv_task_ready        [4];
+    logic                          adv_sched_valid       [4];
+    logic [TASK_ID_WIDTH-1:0]      adv_sched_id          [4];
+    logic [BURST_TIME_WIDTH-1:0]   adv_sched_burst       [4];
+    logic [PRIORITY_WIDTH-1:0]     adv_sched_priority    [4];
+    logic [$clog2(MAX_TASKS):0]    adv_queue_count       [4];
+    logic                          adv_queue_full        [4];
+    logic                          adv_queue_empty       [4];
+
+    // -------------------------------------------------------------------------
+    // Generate: 7 basic schedulers
+    // -------------------------------------------------------------------------
+    genvar i;
+    generate
+        for (i = 0; i < 7; i++) begin : gen_basic_schedulers
+            task_scheduler #(
+                .MAX_TASKS       (MAX_TASKS),
+                .TASK_ID_WIDTH   (TASK_ID_WIDTH),
                 .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
-                .PRIORITY_WIDTH(PRIORITY_WIDTH),
-                .DEADLINE_WIDTH(DEADLINE_WIDTH),
-                .TIME_QUANTUM(TIME_QUANTUM),
-                .SCHEDULER_TYPE(i)
-            ) basic_sched (        //instance_name (connections)
-                .clk(clk),  //Connecting signals (ports)
-                .rst_n(rst_n && (scheduler_select == i)),    //Only active scheduler gets reset
-                .task_valid(task_valid && (scheduler_select == i)),
-                .task_id(task_id),
-                .burst_time(burst_time),
-                .priority(priority),
-                .deadline(deadline),
-                .task_ready(),
-                .scheduled_task_valid(),
-                .scheduled_task_id(),
-                .scheduled_burst_time(),
-                .scheduled_priority(),
-                .scheduled_deadline(),
-                .task_complete(task_complete && (scheduler_select == i)),
-                .queue_count(),
-                .queue_full(),
-                .queue_empty()
+                .PRIORITY_WIDTH  (PRIORITY_WIDTH),
+                .DEADLINE_WIDTH  (DEADLINE_WIDTH),
+                .TIME_QUANTUM    (TIME_QUANTUM),
+                .SCHEDULER_TYPE  (i)
+            ) u_basic (
+                .clk              (clk),
+                .rst_n            (rst_n && (scheduler_select == 4'(i))),
+                .task_valid       (task_valid  && (scheduler_select == 4'(i))),
+                .task_id          (task_id),
+                .burst_time       (burst_time),
+                .task_priority         (task_priority),
+                .deadline         (deadline),
+                .task_ready       (basic_task_ready    [i]),
+                .scheduled_task_valid  (basic_sched_valid   [i]),
+                .scheduled_task_id     (basic_sched_id      [i]),
+                .scheduled_burst_time  (basic_sched_burst   [i]),
+                .scheduled_priority    (basic_sched_priority[i]),
+                .scheduled_deadline    (basic_sched_deadline[i]),
+                .task_complete    (task_complete && (scheduler_select == 4'(i))),
+                .queue_count      (basic_queue_count [i]),
+                .queue_full       (basic_queue_full  [i]),
+                .queue_empty      (basic_queue_empty [i])
             );
         end
     endgenerate
-    
-    // Instantiate advanced schedulers
+
+    // -------------------------------------------------------------------------
+    // Generate: 4 advanced schedulers
+    // -------------------------------------------------------------------------
     genvar j;
     generate
         for (j = 0; j < 4; j++) begin : gen_advanced_schedulers
             advanced_task_scheduler #(
-                .MAX_TASKS(MAX_TASKS),
-                .TASK_ID_WIDTH(TASK_ID_WIDTH),
+                .MAX_TASKS       (MAX_TASKS),
+                .TASK_ID_WIDTH   (TASK_ID_WIDTH),
                 .BURST_TIME_WIDTH(BURST_TIME_WIDTH),
-                .PRIORITY_WIDTH(PRIORITY_WIDTH),
-                .DEADLINE_WIDTH(DEADLINE_WIDTH),
-                .SCHEDULER_TYPE(j)
-            ) adv_sched (
-                .clk(clk),
-                .rst_n(rst_n && (scheduler_select == (7 + j))),
-                .task_valid(task_valid && (scheduler_select == (7 + j))),
-                .task_id(task_id),
-                .burst_time(burst_time),
-                .priority(priority),
-                .deadline(deadline),
-                .task_ready(),
-                .scheduled_task_valid(),
-                .scheduled_task_id(),
-                .scheduled_burst_time(),
-                .scheduled_priority(),
-                .task_tick(task_tick && (scheduler_select == (7 + j))),
-                .task_complete(task_complete && (scheduler_select == (7 + j))),
-                .queue_count(),
-                .queue_full(),
-                .queue_empty()
+                .PRIORITY_WIDTH  (PRIORITY_WIDTH),
+                .DEADLINE_WIDTH  (DEADLINE_WIDTH),
+                .SCHEDULER_TYPE  (j)
+            ) u_adv (
+                .clk              (clk),
+                .rst_n            (rst_n && (scheduler_select == 4'(7 + j))),
+                .task_valid       (task_valid  && (scheduler_select == 4'(7 + j))),
+                .task_id          (task_id),
+                .burst_time       (burst_time),
+                .task_priority         (task_priority),
+                .deadline         (deadline),
+                .task_ready       (adv_task_ready    [j]),
+                .scheduled_task_valid  (adv_sched_valid   [j]),
+                .scheduled_task_id     (adv_sched_id      [j]),
+                .scheduled_burst_time  (adv_sched_burst   [j]),
+                .scheduled_priority    (adv_sched_priority[j]),
+                .task_tick        (task_tick    && (scheduler_select == 4'(7 + j))),
+                .task_complete    (task_complete && (scheduler_select == 4'(7 + j))),
+                .queue_count      (adv_queue_count [j]),
+                .queue_full       (adv_queue_full  [j]),
+                .queue_empty      (adv_queue_empty [j])
             );
         end
     endgenerate
-    
-    // Output multiplexing based on scheduler selection
-    always_comb begin   // Pure combinational logic , Triggered by any change in inputs
-        if (scheduler_select < 7) begin
-            // Basic schedulers
-            task_ready = gen_basic_schedulers[scheduler_select].basic_sched.task_ready;
-            scheduled_task_valid = gen_basic_schedulers[scheduler_select].basic_sched.scheduled_task_valid;
-            scheduled_task_id = gen_basic_schedulers[scheduler_select].basic_sched.scheduled_task_id;
-            scheduled_burst_time = gen_basic_schedulers[scheduler_select].basic_sched.scheduled_burst_time;
-            scheduled_priority = gen_basic_schedulers[scheduler_select].basic_sched.scheduled_priority;
-            scheduled_deadline = gen_basic_schedulers[scheduler_select].basic_sched.scheduled_deadline;
-            queue_count = gen_basic_schedulers[scheduler_select].basic_sched.queue_count;
-            queue_full = gen_basic_schedulers[scheduler_select].basic_sched.queue_full;
-            queue_empty = gen_basic_schedulers[scheduler_select].basic_sched.queue_empty;
-        end else if (scheduler_select >= 7 && scheduler_select < 11) begin
-            // Advanced schedulers
-            task_ready = gen_advanced_schedulers[scheduler_select - 7].adv_sched.task_ready;
-            scheduled_task_valid = gen_advanced_schedulers[scheduler_select - 7].adv_sched.scheduled_task_valid;
-            scheduled_task_id = gen_advanced_schedulers[scheduler_select - 7].adv_sched.scheduled_task_id;
-            scheduled_burst_time = gen_advanced_schedulers[scheduler_select - 7].adv_sched.scheduled_burst_time;
-            scheduled_priority = gen_advanced_schedulers[scheduler_select - 7].adv_sched.scheduled_priority;
-            scheduled_deadline = 'x;  // Advanced schedulers don't output deadline (unknown value)
-            queue_count = gen_advanced_schedulers[scheduler_select - 7].adv_sched.queue_count;
-            queue_full = gen_advanced_schedulers[scheduler_select - 7].adv_sched.queue_full;
-            queue_empty = gen_advanced_schedulers[scheduler_select - 7].adv_sched.queue_empty;
-        end else begin
-            task_ready = 1'b0;
-            scheduled_task_valid = 1'b0;
-            scheduled_task_id = 'x;
-            scheduled_burst_time = 'x;
-            scheduled_priority = 'x;
-            scheduled_deadline = 'x;
-            queue_count = 'x;
-            queue_full = 1'b1;
-            queue_empty = 1'b1;
+
+    // -------------------------------------------------------------------------
+    // Output mux - indexes the intermediate arrays (always legal)
+    // -------------------------------------------------------------------------
+    always_comb begin
+        // Defaults (invalid / out-of-range selector)
+        task_ready           = 1'b0;
+        scheduled_task_valid = 1'b0;
+        scheduled_task_id    = '0;
+        scheduled_burst_time = '0;
+        scheduled_priority   = '0;
+        scheduled_deadline   = '0;
+        queue_count          = '0;
+        queue_full           = 1'b1;
+        queue_empty          = 1'b1;
+
+        if (scheduler_select < 4'd7) begin
+            // ---- Basic schedulers ----
+            task_ready           = basic_task_ready    [scheduler_select];
+            scheduled_task_valid = basic_sched_valid   [scheduler_select];
+            scheduled_task_id    = basic_sched_id      [scheduler_select];
+            scheduled_burst_time = basic_sched_burst   [scheduler_select];
+            scheduled_priority   = basic_sched_priority[scheduler_select];
+            scheduled_deadline   = basic_sched_deadline[scheduler_select];
+            queue_count          = basic_queue_count   [scheduler_select];
+            queue_full           = basic_queue_full    [scheduler_select];
+            queue_empty          = basic_queue_empty   [scheduler_select];
+
+        end else if (scheduler_select >= 4'd7 && scheduler_select < 4'd11) begin
+            // ---- Advanced schedulers (offset by 7) ----
+            // scheduler_select - 7 maps  7->0, 8->1, 9->2, 10->3
+            task_ready           = adv_task_ready    [scheduler_select - 4'd7];
+            scheduled_task_valid = adv_sched_valid   [scheduler_select - 4'd7];
+            scheduled_task_id    = adv_sched_id      [scheduler_select - 4'd7];
+            scheduled_burst_time = adv_sched_burst   [scheduler_select - 4'd7];
+            scheduled_priority   = adv_sched_priority[scheduler_select - 4'd7];
+            scheduled_deadline   = '0;   // advanced schedulers have no deadline output
+            queue_count          = adv_queue_count   [scheduler_select - 4'd7];
+            queue_full           = adv_queue_full    [scheduler_select - 4'd7];
+            queue_empty          = adv_queue_empty   [scheduler_select - 4'd7];
         end
     end
-    
+
+    // -------------------------------------------------------------------------
     // Statistics collection
-    //creating a custom data type named task_stats_t
+    // -------------------------------------------------------------------------
     typedef struct {
         logic [TASK_ID_WIDTH-1:0] id;
-        logic [31:0] arrival_time;
-        logic [31:0] completion_time;
+        logic [31:0]              arrival_time;
+        logic [31:0]              completion_time;
     } task_stats_t;
-    
-    task_stats_t task_stats [255:0];  //array of 256 tasks
-    logic [7:0] stats_write_ptr;   //Tells where to store the next incoming task’s data in the task_stats array
-    logic [7:0] stats_read_ptr;   //Used to read or process stored task statistics
-    logic [31:0] current_time;    //This is a global time counter
-    
-    //It runs on every clock and keeps track of time, task arrivals, and task completions.
+
+    task_stats_t task_stats     [255:0];
+    logic [7:0]  stats_write_ptr;
+    logic [7:0]  stats_read_ptr;
+    logic [31:0] current_time;
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             total_tasks_processed <= '0;
-            total_wait_time <= '0;
+            total_wait_time       <= '0;
             total_turnaround_time <= '0;
-            stats_write_ptr <= '0;
-            stats_read_ptr <= '0;
-            current_time <= '0;
+            stats_write_ptr       <= '0;
+            stats_read_ptr        <= '0;
+            current_time          <= '0;
+            for (int k = 0; k < 256; k++) begin
+                task_stats[k].id             <= '0;
+                task_stats[k].arrival_time   <= '0;
+                task_stats[k].completion_time<= '0;
+            end
         end else begin
             current_time <= current_time + 1;
-            
+
             // Record task arrival
-            if (task_valid && task_ready) begin //(A new task is coming && Scheduler can accept it)
-                task_stats[stats_write_ptr].id <= task_id;
+            if (task_valid && task_ready) begin
+                task_stats[stats_write_ptr].id           <= task_id;
                 task_stats[stats_write_ptr].arrival_time <= current_time;
-                stats_write_ptr <= stats_write_ptr + 1;   //move pointer to next slot
+                stats_write_ptr <= stats_write_ptr + 1;
             end
-            
+
             // Record task completion
             if (task_complete && scheduled_task_valid) begin
-                automatic logic [31:0] turnaround, wait_time;  //Temporary (local) variables for calculation
-                
-                // Find the task in stats
                 for (int k = 0; k < 256; k++) begin
                     if (task_stats[k].id == scheduled_task_id) begin
+                        automatic logic [31:0] turnaround;
+                        automatic logic [31:0] wait_t;
                         task_stats[k].completion_time <= current_time;
                         turnaround = current_time - task_stats[k].arrival_time;
-                        wait_time = turnaround - scheduled_burst_time;
-                        
+                        wait_t     = (turnaround >= scheduled_burst_time) ?
+                                     (turnaround  - scheduled_burst_time) : '0;
                         total_turnaround_time <= total_turnaround_time + turnaround;
-                        total_wait_time <= total_wait_time + wait_time;
+                        total_wait_time       <= total_wait_time       + wait_t;
                         total_tasks_processed <= total_tasks_processed + 1;
                         break;
                     end
